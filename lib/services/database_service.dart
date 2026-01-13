@@ -50,6 +50,14 @@ class DatabaseService {
     await _client.from(_collectionsTable).delete().eq('id', id);
   }
 
+  /// Update an existing collection
+  Future<void> updateCollection(int id, String title, String amount) async {
+    await _client.from(_collectionsTable).update({
+      'title': title,
+      'amount': amount,
+    }).eq('id', id);
+  }
+
   // --- Students ---
 
   /// Fetch students for a specific collection

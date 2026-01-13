@@ -40,6 +40,68 @@ class _CustomListsScreenState extends State<CustomListsScreen> {
     }
   }
 
+  Future<void> _editCollection(Collection collection) async {
+    final TextEditingController titleController =
+        TextEditingController(text: collection.title);
+    final TextEditingController amountController =
+        TextEditingController(text: collection.amount);
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit List'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleController,
+              decoration: const InputDecoration(labelText: 'List Name'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: amountController,
+              decoration: const InputDecoration(labelText: 'Amount (₹)'),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (titleController.text.isNotEmpty) {
+                try {
+                  await _databaseService.updateCollection(
+                    collection.id!,
+                    titleController.text,
+                    amountController.text.isEmpty ? '0' : amountController.text,
+                  );
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('List updated successfully')),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error updating list: $e')),
+                    );
+                  }
+                }
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -113,32 +175,43 @@ class _CustomListsScreenState extends State<CustomListsScreen> {
                       Text('Amount: ₹${collection.amount}'),
                     ],
                   ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    onPressed: () {
-                      if (collection.id != null) {
-                        showDialog(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                                  title: const Text('Delete List?'),
-                                  content: const Text(
-                                      'This will delete the list and all student data within it.'),
-                                  actions: [
-                                    TextButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: const Text('Cancel')),
-                                    TextButton(
-                                        onPressed: () {
-                                          Navigator.pop(context);
-                                          _deleteCollection(collection.id!);
-                                        },
-                                        child: const Text('Delete',
-                                            style:
-                                                TextStyle(color: Colors.red))),
-                                  ],
-                                ));
-                      }
-                    },
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: Colors.blue),
+                        onPressed: () => _editCollection(collection),
+                      ),
+                      IconButton(
+                        icon:
+                            const Icon(Icons.delete_outline, color: Colors.red),
+                        onPressed: () {
+                          if (collection.id != null) {
+                            showDialog(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                      title: const Text('Delete List?'),
+                                      content: const Text(
+                                          'This will delete the list and all student data within it.'),
+                                      actions: [
+                                        TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context),
+                                            child: const Text('Cancel')),
+                                        TextButton(
+                                            onPressed: () {
+                                              Navigator.pop(context);
+                                              _deleteCollection(collection.id!);
+                                            },
+                                            child: const Text('Delete',
+                                                style: TextStyle(
+                                                    color: Colors.red))),
+                                      ],
+                                    ));
+                          }
+                        },
+                      ),
+                    ],
                   ),
                   onTap: () {
                     Navigator.push(
