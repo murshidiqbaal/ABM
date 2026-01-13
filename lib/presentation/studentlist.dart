@@ -6,9 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../constants/student_data.dart';
 import '../dbmodels/models.dart';
 import '../services/database_service.dart';
-import '../constants/student_data.dart';
 
 class StudentListScreen extends StatefulWidget {
   final Collection collection;
@@ -42,13 +42,14 @@ class _StudentListScreenState extends State<StudentListScreen> {
   }
 
   // Helper to calculate totals from a list of students
-  Map<String, int> _calculateTotals(List<Student> students) {
+  Map<String, int> _calculateTotals(
+      List<Student> students, String currentAmount) {
     int total = 0;
     int count = 0;
     int surplus = 0; // + value
     int deficit = 0; // - value
 
-    int amountModel = int.tryParse(widget.collection.amount) ?? 0;
+    int amountModel = int.tryParse(currentAmount) ?? 0;
 
     for (var student in students) {
       if (student.isSelected) {
@@ -283,6 +284,86 @@ class _StudentListScreenState extends State<StudentListScreen> {
     );
   }
 
+  Future<void> _deleteCollection(int id) async {
+    try {
+      await _databaseService.deleteCollection(id);
+      if (mounted) {
+        Navigator.pop(context); // Leave screen
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('List deleted successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error deleting list: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _editCollection(Collection collection) async {
+    final TextEditingController titleController =
+        TextEditingController(text: collection.title);
+    final TextEditingController amountController =
+        TextEditingController(text: collection.amount);
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit List'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleController,
+              decoration: const InputDecoration(labelText: 'List Name'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: amountController,
+              decoration: const InputDecoration(labelText: 'Amount (₹)'),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (titleController.text.isNotEmpty) {
+                try {
+                  await _databaseService.updateCollection(
+                    collection.id!,
+                    titleController.text,
+                    amountController.text.isEmpty ? '0' : amountController.text,
+                  );
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('List updated successfully')),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error updating list: $e')),
+                    );
+                  }
+                }
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _toggleSearch() {
     setState(() {
       _isSearching = !_isSearching;
@@ -294,293 +375,338 @@ class _StudentListScreenState extends State<StudentListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<Student>>(
-        stream: _databaseService.getStudentsStream(widget.collection.id!),
-        builder: (context, snapshot) {
-          List<Student> allStudents = [];
-          List<Student> filteredStudents = [];
-
-          if (snapshot.hasData) {
-            allStudents = snapshot.data!;
-            // Apply search filter here
-            if (_searchController.text.isNotEmpty) {
-              filteredStudents = allStudents
-                  .where((student) => student.name
-                      .toLowerCase()
-                      .contains(_searchController.text.toLowerCase()))
-                  .toList();
-            } else {
-              filteredStudents = allStudents;
-            }
+    return StreamBuilder<Collection?>(
+        stream: _databaseService
+            .getCollectionStream(widget.collection.id!)
+            .handleError((_) => null),
+        builder: (context, colSnapshot) {
+          if (colSnapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+                body: Center(child: CircularProgressIndicator()));
           }
 
-          final totals = _calculateTotals(allStudents);
+          final currentCollection = colSnapshot.data;
 
-          // Prepare a Collection object with populated students for export functions
-          final exportCollection = Collection(
-              title: widget.collection.title,
-              amount: widget.collection.amount,
-              studentList: allStudents,
-              id: widget.collection.id);
+          if (currentCollection == null) {
+            return const Scaffold(
+                body: Center(child: Text("List not found or deleted.")));
+          }
 
-          return Scaffold(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            appBar: AppBar(
-              backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-              title: _isSearching
-                  ? TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search here...',
-                        border: InputBorder.none,
-                        hintStyle: TextStyle(
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant),
-                      ),
-                      style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface),
-                      onChanged: (query) {
-                        setState(() {}); // Trigger rebuild to filter
-                      },
-                      autofocus: true,
-                    )
-                  : Text(
-                      '${widget.collection.title.toUpperCase()}  ${widget.collection.amount}₹',
-                      style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface),
-                    ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: _toggleSearch,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.person_add),
-                  onPressed: _showAddStudentsDialog,
-                  tooltip: 'Add Students',
-                ),
-                PopupMenuButton<String>(
-                  onSelected: (value) {
-                    if (value == 'text') {
-                      shareCollectionAsText(exportCollection);
-                    } else if (value == 'excel') {
-                      generateAndShareExcel(exportCollection);
-                    } else if (value == 'copy') {
-                      copyCollectionToClipboard(context, exportCollection);
-                    }
-                  },
-                  itemBuilder: (BuildContext context) =>
-                      <PopupMenuEntry<String>>[
-                    const PopupMenuItem<String>(
-                      value: 'text',
-                      child: ListTile(
-                        leading: Icon(Icons.share, color: Colors.blue),
-                        title: Text('Share as Text'),
-                      ),
-                    ),
-                    const PopupMenuItem<String>(
-                      value: 'excel',
-                      child: ListTile(
-                        leading: Icon(Icons.table_chart, color: Colors.green),
-                        title: Text('Export to Excel'),
-                      ),
-                    ),
-                    const PopupMenuItem<String>(
-                      value: 'copy',
-                      child: ListTile(
-                        leading: Icon(Icons.copy, color: Colors.orange),
-                        title: Text('Copy to Clipboard'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            body: Column(
-              children: [
-                Expanded(
-                  child: snapshot.hasError
-                      ? Center(child: Text('Error: ${snapshot.error}'))
-                      : (snapshot.connectionState == ConnectionState.waiting)
-                          ? const Center(child: CircularProgressIndicator())
-                          : filteredStudents.isEmpty
-                              ? Center(
-                                  child: Text(
-                                    'No student found',
-                                    style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurface,
-                                        fontSize: 18),
-                                  ),
-                                )
-                              : RefreshIndicator(
-                                  onRefresh: () async {
-                                    setState(() {});
-                                  },
-                                  child: ListView.builder(
-                                    physics:
-                                        const AlwaysScrollableScrollPhysics(),
-                                    controller: _scrollController,
-                                    itemCount: filteredStudents.length,
-                                    itemBuilder: (context, index) {
-                                      final student = filteredStudents[index];
+          return StreamBuilder<List<Student>>(
+              stream: _databaseService.getStudentsStream(currentCollection.id!),
+              builder: (context, snapshot) {
+                List<Student> allStudents = [];
+                List<Student> filteredStudents = [];
 
-                                      return Slidable(
-                                        // key: ValueKey(student.id),
-                                        endActionPane: ActionPane(
-                                          motion: const ScrollMotion(),
-                                          children: [
-                                            SlidableAction(
-                                              onPressed: (context) {
-                                                _deleteStudent(student);
-                                              },
-                                              backgroundColor: Colors.red,
-                                              foregroundColor: Colors.white,
-                                              icon: Icons.delete,
-                                              label: 'Delete',
-                                            ),
-                                          ],
+                if (snapshot.hasData) {
+                  allStudents = snapshot.data!;
+                  if (_searchController.text.isNotEmpty) {
+                    filteredStudents = allStudents
+                        .where((student) => student.name
+                            .toLowerCase()
+                            .contains(_searchController.text.toLowerCase()))
+                        .toList();
+                  } else {
+                    filteredStudents = allStudents;
+                  }
+                }
+
+                final totals =
+                    _calculateTotals(allStudents, currentCollection.amount);
+
+                final exportCollection = Collection(
+                    title: currentCollection.title,
+                    amount: currentCollection.amount,
+                    studentList: allStudents,
+                    id: currentCollection.id);
+
+                return Scaffold(
+                  backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                  appBar: AppBar(
+                    backgroundColor:
+                        Theme.of(context).appBarTheme.backgroundColor,
+                    title: _isSearching
+                        ? TextField(
+                            controller: _searchController,
+                            decoration: InputDecoration(
+                              hintText: 'Search here...',
+                              border: InputBorder.none,
+                              hintStyle: TextStyle(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant),
+                            ),
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface),
+                            onChanged: (query) {
+                              setState(() {}); // Trigger rebuild to filter
+                            },
+                            autofocus: true,
+                          )
+                        : Text(
+                            '${currentCollection.title.toUpperCase()}  ${currentCollection.amount}₹',
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface),
+                          ),
+                    actions: [
+                      IconButton(
+                        icon: const Icon(Icons.search),
+                        onPressed: _toggleSearch,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.person_add),
+                        onPressed: _showAddStudentsDialog,
+                        tooltip: 'Add Students',
+                      ),
+                      PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (value == 'text') {
+                            shareCollectionAsText(exportCollection);
+                          } else if (value == 'excel') {
+                            generateAndShareExcel(exportCollection);
+                          } else if (value == 'copy') {
+                            copyCollectionToClipboard(
+                                context, exportCollection);
+                          }
+                        },
+                        itemBuilder: (BuildContext context) =>
+                            <PopupMenuEntry<String>>[
+                          const PopupMenuItem<String>(
+                            value: 'text',
+                            child: ListTile(
+                              leading: Icon(Icons.share, color: Colors.blue),
+                              title: Text('Share as Text'),
+                            ),
+                          ),
+                          const PopupMenuItem<String>(
+                            value: 'excel',
+                            child: ListTile(
+                              leading:
+                                  Icon(Icons.table_chart, color: Colors.green),
+                              title: Text('Export to Excel'),
+                            ),
+                          ),
+                          const PopupMenuItem<String>(
+                            value: 'copy',
+                            child: ListTile(
+                              leading: Icon(Icons.copy, color: Colors.orange),
+                              title: Text('Copy to Clipboard'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  body: Column(
+                    children: [
+                      Expanded(
+                        child: snapshot.hasError
+                            ? Center(child: Text('Error: ${snapshot.error}'))
+                            : (snapshot.connectionState ==
+                                    ConnectionState.waiting)
+                                ? const Center(
+                                    child: CircularProgressIndicator())
+                                : filteredStudents.isEmpty
+                                    ? Center(
+                                        child: Text(
+                                          'No student found',
+                                          style: TextStyle(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface,
+                                              fontSize: 18),
                                         ),
-                                        child: ListTile(
-                                          title: Row(
-                                            children: [
-                                              Text(
-                                                '${index + 1}.  ',
-                                                style: TextStyle(
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .onSurfaceVariant),
+                                      )
+                                    : RefreshIndicator(
+                                        onRefresh: () async {
+                                          setState(() {});
+                                        },
+                                        child: ListView.builder(
+                                          physics:
+                                              const AlwaysScrollableScrollPhysics(),
+                                          controller: _scrollController,
+                                          itemCount: filteredStudents.length,
+                                          itemBuilder: (context, index) {
+                                            final student =
+                                                filteredStudents[index];
+
+                                            return Slidable(
+                                              // key: ValueKey(student.id),
+                                              endActionPane: ActionPane(
+                                                motion: const ScrollMotion(),
+                                                children: [
+                                                  SlidableAction(
+                                                    onPressed: (context) {
+                                                      _deleteStudent(student);
+                                                    },
+                                                    backgroundColor: Colors.red,
+                                                    foregroundColor:
+                                                        Colors.white,
+                                                    icon: Icons.delete,
+                                                    label: 'Delete',
+                                                  ),
+                                                ],
                                               ),
-                                              Text(
-                                                student.name,
-                                                style: GoogleFonts.electrolize(
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .onSurface),
-                                              ),
-                                            ],
-                                          ),
-                                          subtitle: student
-                                                  .paymentMethod.isNotEmpty
-                                              ? Row(
+                                              child: ListTile(
+                                                title: Row(
                                                   children: [
                                                     Text(
-                                                      'Payment: ${student.paymentMethod}  ',
+                                                      '${index + 1}.  ',
                                                       style: TextStyle(
-                                                        fontSize: 14,
-                                                        color:
-                                                            student.paymentMethod ==
-                                                                    'GPay'
-                                                                ? Colors.green
-                                                                : Colors.blue,
-                                                      ),
+                                                          color: Theme.of(
+                                                                  context)
+                                                              .colorScheme
+                                                              .onSurfaceVariant),
                                                     ),
-                                                    if (student.paymentMethod
-                                                        .isNotEmpty)
-                                                      Builder(
-                                                          builder: (context) {
-                                                        // Logic: Treat null balance as Full Payment (Expected Amount)
-                                                        double expected = double
-                                                                .tryParse(widget
-                                                                    .collection
-                                                                    .amount) ??
-                                                            0.0;
-                                                        double paid =
-                                                            student.balance ??
-                                                                expected;
-
-                                                        int diff =
-                                                            (paid - expected)
-                                                                .toInt();
-
-                                                        // Only show difference if there IS a difference
-                                                        if (diff == 0) {
-                                                          return const SizedBox
-                                                              .shrink();
-                                                        }
-
-                                                        return Text(
-                                                          diff > 0
-                                                              ? '+$diff'
-                                                              : '$diff',
-                                                          style: TextStyle(
-                                                            fontSize: 14,
-                                                            color: diff > 0
-                                                                ? Colors.green
-                                                                : Colors.red,
-                                                          ),
-                                                        );
-                                                      }),
+                                                    Text(
+                                                      student.name,
+                                                      style: GoogleFonts
+                                                          .electrolize(
+                                                              color: Theme.of(
+                                                                      context)
+                                                                  .colorScheme
+                                                                  .onSurface),
+                                                    ),
                                                   ],
-                                                )
-                                              : null,
-                                          trailing: Checkbox(
-                                            value: student.isSelected,
-                                            onChanged: (bool? value) {
-                                              _toggleSelection(student);
-                                            },
-                                            fillColor:
-                                                WidgetStateProperty.resolveWith(
-                                                    (states) =>
-                                                        Colors.blueAccent),
-                                          ),
+                                                ),
+                                                subtitle: student.paymentMethod
+                                                        .isNotEmpty
+                                                    ? Row(
+                                                        children: [
+                                                          Text(
+                                                            'Payment: ${student.paymentMethod}  ',
+                                                            style: TextStyle(
+                                                              fontSize: 14,
+                                                              color:
+                                                                  student.paymentMethod ==
+                                                                          'GPay'
+                                                                      ? Colors
+                                                                          .green
+                                                                      : Colors
+                                                                          .blue,
+                                                            ),
+                                                          ),
+                                                          if (student
+                                                              .paymentMethod
+                                                              .isNotEmpty)
+                                                            Builder(builder:
+                                                                (context) {
+                                                              // Logic: Treat null balance as Full Payment (Expected Amount)
+                                                              double expected =
+                                                                  double.tryParse(
+                                                                          currentCollection
+                                                                              .amount) ??
+                                                                      0.0;
+                                                              double paid =
+                                                                  student.balance ??
+                                                                      expected;
+
+                                                              int diff = (paid -
+                                                                      expected)
+                                                                  .toInt();
+
+                                                              // Only show difference if there IS a difference
+                                                              if (diff == 0) {
+                                                                return const SizedBox
+                                                                    .shrink();
+                                                              }
+
+                                                              return Text(
+                                                                diff > 0
+                                                                    ? '+$diff'
+                                                                    : '$diff',
+                                                                style:
+                                                                    TextStyle(
+                                                                  fontSize: 14,
+                                                                  color: diff >
+                                                                          0
+                                                                      ? Colors
+                                                                          .green
+                                                                      : Colors
+                                                                          .red,
+                                                                ),
+                                                              );
+                                                            }),
+                                                        ],
+                                                      )
+                                                    : null,
+                                                trailing: Checkbox(
+                                                  value: student.isSelected,
+                                                  onChanged: (bool? value) {
+                                                    _toggleSelection(student);
+                                                  },
+                                                  fillColor: WidgetStateProperty
+                                                      .resolveWith((states) {
+                                                    if (states.contains(
+                                                        WidgetState.selected)) {
+                                                      return Colors.blueAccent;
+                                                    }
+                                                    return Colors.grey;
+                                                  }),
+                                                ),
+                                              ),
+                                            );
+                                          },
                                         ),
-                                      );
-                                    },
+                                      ),
+                      ),
+                    ],
+                  ),
+                  bottomNavigationBar: BottomAppBar(
+                    color: Theme.of(context).appBarTheme.backgroundColor,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Total (${totals['selectedCount']}) :',
+                            style: TextStyle(
+                                fontSize: 20,
+                                color: Theme.of(context)
+                                    .textTheme
+                                    .bodyLarge
+                                    ?.color),
+                          ),
+                          Row(
+                            children: [
+                              if ((totals['surplus'] ?? 0) > 0)
+                                Text(
+                                  '+${totals['surplus']} ',
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    color: Colors.green,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                ),
-              ],
-            ),
-            bottomNavigationBar: BottomAppBar(
-              color: Theme.of(context).appBarTheme.backgroundColor,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Total (${totals['selectedCount']}) :',
-                      style: TextStyle(
-                          fontSize: 20,
-                          color: Theme.of(context).textTheme.bodyLarge?.color),
+                              if ((totals['deficit'] ?? 0) > 0)
+                                Text(
+                                  '-${totals['deficit']} ',
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    color: Colors.red,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              Text(
+                                ' ₹${totals['totalSum']}',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  color: Theme.of(context)
+                                      .textTheme
+                                      .bodyLarge
+                                      ?.color,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                    Row(
-                      children: [
-                        if ((totals['surplus'] ?? 0) > 0)
-                          Text(
-                            '+${totals['surplus']} ',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              color: Colors.green,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        if ((totals['deficit'] ?? 0) > 0)
-                          Text(
-                            '-${totals['deficit']} ',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              color: Colors.red,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        Text(
-                          ' ₹${totals['totalSum']}',
-                          style: TextStyle(
-                            fontSize: 20,
-                            color: Theme.of(context).textTheme.bodyLarge?.color,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
+                  ),
+                );
+              });
         });
   }
 }

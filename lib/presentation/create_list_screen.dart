@@ -203,7 +203,12 @@ class _CreateListScreenState extends State<CreateListScreen> {
                         onChanged: (_) => _toggleSelection(name),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(4)),
-                        activeColor: Colors.blueAccent,
+                        fillColor: WidgetStateProperty.resolveWith((states) {
+                          if (states.contains(WidgetState.selected)) {
+                            return Colors.blueAccent;
+                          }
+                          return Colors.grey;
+                        }),
                       ),
                       title: Text(
                         name,

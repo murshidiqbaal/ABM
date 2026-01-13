@@ -175,43 +175,44 @@ class _CustomListsScreenState extends State<CustomListsScreen> {
                       Text('Amount: ₹${collection.amount}'),
                     ],
                   ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.blue),
-                        onPressed: () => _editCollection(collection),
+                  leading: InkWell(
+                    onTap: () => _editCollection(collection),
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).primaryColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      IconButton(
-                        icon:
-                            const Icon(Icons.delete_outline, color: Colors.red),
-                        onPressed: () {
-                          if (collection.id != null) {
-                            showDialog(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                      title: const Text('Delete List?'),
-                                      content: const Text(
-                                          'This will delete the list and all student data within it.'),
-                                      actions: [
-                                        TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(context),
-                                            child: const Text('Cancel')),
-                                        TextButton(
-                                            onPressed: () {
-                                              Navigator.pop(context);
-                                              _deleteCollection(collection.id!);
-                                            },
-                                            child: const Text('Delete',
-                                                style: TextStyle(
-                                                    color: Colors.red))),
-                                      ],
-                                    ));
-                          }
-                        },
-                      ),
-                    ],
+                      child: Icon(Icons.edit_note_rounded,
+                          color: Theme.of(context).primaryColor),
+                    ),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    onPressed: () {
+                      if (collection.id != null) {
+                        showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                                  title: const Text('Delete List?'),
+                                  content: const Text(
+                                      'This will delete the list and all student data within it.'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: const Text('Cancel')),
+                                    TextButton(
+                                        onPressed: () {
+                                          Navigator.pop(context);
+                                          _deleteCollection(collection.id!);
+                                        },
+                                        child: const Text('Delete',
+                                            style:
+                                                TextStyle(color: Colors.red))),
+                                  ],
+                                ));
+                      }
+                    },
                   ),
                   onTap: () {
                     Navigator.push(

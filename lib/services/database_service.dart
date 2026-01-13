@@ -18,6 +18,16 @@ class DatabaseService {
         .map((maps) => maps.map((map) => Collection.fromJson(map)).toList());
   }
 
+  /// Fetch a single collection stream
+  Stream<Collection?> getCollectionStream(int id) {
+    return _client
+        .from(_collectionsTable)
+        .stream(primaryKey: ['id'])
+        .eq('id', id)
+        .map((event) =>
+            event.isNotEmpty ? Collection.fromJson(event.first) : null);
+  }
+
   /// Add a new collection and its initial list of students
   Future<void> addCollection(
       String title, String amount, List<Student> students) async {
