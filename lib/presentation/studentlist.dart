@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../constants/student_data.dart';
 import '../dbmodels/models.dart';
 import '../services/database_service.dart';
+import '../services/undo_redo_service.dart';
 
 class StudentListScreen extends StatefulWidget {
   final Collection collection;
@@ -77,6 +78,9 @@ class _StudentListScreenState extends State<StudentListScreen> {
   }
 
   void _toggleSelection(Student student) {
+    // 1. Snapshot previous state (redundant but kept for simple setState if needed)
+    // However, the Command handles the logic now.
+
     // Optimistic Update
     setState(() {
       final newSelected = !student.isSelected;
@@ -93,19 +97,124 @@ class _StudentListScreenState extends State<StudentListScreen> {
       }
     });
 
-    // Update in Supabase
-    _databaseService.updateStudent(student).then((_) {
-      // Optional: Show payment dialog if selected
-      if (student.isSelected) {
-        _showPaymentDialog(student);
+    // Use UndoRedoManager to execute the DB update
+    // We already optimistically updated the model, but the Command needs to know the NEW state desired.
+    // Actually, our Command logic takes the student and flips the state.
+    // So we should instantiate the command BEFORE mutating the object in UI if we want the command to handle the "DO" logic fully,
+    // OR we pass the modified object and specific parameters.
+
+    // Let's refine the Command usage.
+    // Ideally, the Command's execute() does the work.
+    // But we want immediate UI feedback (setState).
+    // So we can:
+    // 1. Revert the UI change above (so execute() does it all? No, laggy).
+    // 2. Keep execute() as just the DB call.
+
+    // My existing Command implementation expects to "force" the new state.
+    // Let's rely on the Command to do the DB update, and we just push it to stack.
+    // Wait, if I push to stack, I need to enable "Undo".
+    // I also need "Redo".
+
+    // Correct Flow:
+    // 1. Create Command.
+    // 2. Execute Command (which does DB update).
+    // 3. Add to History.
+
+    // Since we already did setState options, let's use the command for the DB part and history.
+    // But wait, the _toggleSelection logic in Command Constructor reads current state.
+    // We muted it in setState already!
+    // So we must create command BEFORE setState or pass explicit values.
+
+    // To avoid complex refactoring of Command class right now, let's revert the setState change visually,
+    // create the command, then execute it.
+    // Actually, the command logic I wrote toggles !isSelected.
+    // So if the student IS selected, command will UNSELECT.
+    // So we must run command on the current state.
+
+    // Let's rollback the manual setState here and let the Command + setState callback handle it?
+    // No, standard pattern:
+    // 1. Define what happens.
+    // 2. Update UI.
+    // 3. Fire-and-forget DB update wrapped in Command.
+
+    // BETTER APPROACH for minimal friction:
+    // Pass the intended "New State" to command explicitly if needed, but my command infers it.
+    // Let's reverse the in-memory change for a microsecond to create the command correctly? No that's hacky.
+
+    // I'll adjust the logic:
+    // 1. Create Command (it reads 'old' state from student).
+    // 2. Call command.execute() (updates DB).
+    // 3. Update UI (setState).
+    // 4. Add to Manager.
+
+    // BUT: My Command Constructor reads old state.
+    // So I must create it content FIRST.
+
+    // Reverting the manual setState logic above locally:
+    // We will do:
+    final command = ToggleStudentSelectionCommand(student, _databaseService);
+
+    // Optimistic UI Update matches what command WILL do
+    setState(() {
+      // This mimics what command.execute does to the model, but synchronously for UI
+      // (The command.execute also updates the model object, but it's async DB call mostly)
+      // Actually my command.execute ALSO updates the model object fields.
+      // So we can just await command.execute? No, we want instant UI.
+
+      // Let's just update UI manually as before for speed.
+      student.isSelected = !student.isSelected;
+      if (!student.isSelected) {
+        student.paymentMethod = '';
+        student.balance = null;
+      } else {
+        student.balance = null;
       }
+    });
+
+    // Execute DB part async
+    command.execute().then((_) {
+      // Add to stack only on success
+      UndoRedoManager().addCommand(command);
+
+      // Remove the local specific Snackbars since we now have global Shake Undo
+      // (User asked for "dedicated undo and redo button popuped shown when shake")
+      // So we probably don't need the per-action SnackBar anymore, or we can keep it as secondary.
+      // The user said "remove label and update correction value" in previous turn, but for this turning "set a dedicated undo...".
+      // Implied replacement or addition? "Undo for all overall actions".
+      // Use SnackBar is still good UX. Let's keep it but wire it to the Manager?
+      // Or remove SnackBar to avoid clutter if Shake is the primary way?
+      // Let's keep SnackBar as a quick way, but Shake as the "Oh no I made a mistake 5 mins ago" way.
+      // Actually, typically you don't want two ways to undo the same top stack item that might conflict.
+      // If I use Manager, I should probably rely on Manager.
+
+      // Let's remove the specific SnackBar to be clean and rely on Shake (or maybe show a simple "Saved" snackbar).
     });
   }
 
   Future<void> _deleteStudent(Student student) async {
     if (student.id != null) {
-      await _databaseService.deleteStudent(student.id!);
+      final command = DeleteStudentCommand(
+          student, widget.collection.id!, _databaseService);
+
+      // Execute command + DB update
+      // We manually clear it from UI first if we want optimistic, but
+      // currently logic waits for DB stream or standard setState.
+      // The original logic did optimistic setState.
+
+      await command.execute();
+
       setState(() {});
+
+      if (mounted) {
+        UndoRedoManager().addCommand(command);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${student.name} deleted'),
+            duration: const Duration(
+                seconds: 2), // Short duration since we have Shake Undo
+          ),
+        );
+      }
     }
   }
 
@@ -258,16 +367,47 @@ class _StudentListScreenState extends State<StudentListScreen> {
             actions: [
               TextButton(
                 onPressed: () {
-                  // Update Student object properties
-                  student.balance = double.tryParse(_balanceController.text);
+                  // 1. Snapshot previous state
+                  final oldBalance = student.balance;
+                  final oldPaymentMethod = student.paymentMethod;
 
+                  // 2. Determine new values
+                  final newBalance = double.tryParse(_balanceController.text);
+                  String newPaymentMethod = student.paymentMethod;
                   if (selector == 1) {
-                    student.paymentMethod = 'GPay';
+                    newPaymentMethod = 'GPay';
                   } else if (selector == 2) {
-                    student.paymentMethod = 'Liquid';
+                    newPaymentMethod = 'Liquid';
                   }
 
-                  _databaseService.updateStudent(student);
+                  // 3. Create Command
+                  final command = UpdateStudentPaymentCommand(
+                      student: student,
+                      service: _databaseService,
+                      oldBalance: oldBalance,
+                      oldPaymentMethod: oldPaymentMethod,
+                      newBalance: newBalance,
+                      newPaymentMethod: newPaymentMethod);
+
+                  // 4. Update UI Optimistically (Manual set instead of command.execute to keep it sync/fast)
+                  setState(() {
+                    student.balance = newBalance;
+                    student.paymentMethod = newPaymentMethod;
+                  });
+
+                  // 5. Execute DB & History
+                  command.execute().then((_) {
+                    if (mounted) {
+                      UndoRedoManager().addCommand(command);
+                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Payment details updated'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  });
 
                   _balanceController.clear();
                   Navigator.pop(context);
@@ -571,63 +711,16 @@ class _StudentListScreenState extends State<StudentListScreen> {
                                                 ),
                                                 subtitle: student.paymentMethod
                                                         .isNotEmpty
-                                                    ? Row(
-                                                        children: [
-                                                          Text(
-                                                            'Payment: ${student.paymentMethod}  ',
-                                                            style: TextStyle(
-                                                              fontSize: 14,
-                                                              color:
-                                                                  student.paymentMethod ==
-                                                                          'GPay'
-                                                                      ? Colors
-                                                                          .green
-                                                                      : Colors
-                                                                          .blue,
-                                                            ),
-                                                          ),
-                                                          if (student
-                                                              .paymentMethod
-                                                              .isNotEmpty)
-                                                            Builder(builder:
-                                                                (context) {
-                                                              // Logic: Treat null balance as Full Payment (Expected Amount)
-                                                              double expected =
-                                                                  double.tryParse(
-                                                                          currentCollection
-                                                                              .amount) ??
-                                                                      0.0;
-                                                              double paid =
-                                                                  student.balance ??
-                                                                      expected;
-
-                                                              int diff = (paid -
-                                                                      expected)
-                                                                  .toInt();
-
-                                                              // Only show difference if there IS a difference
-                                                              if (diff == 0) {
-                                                                return const SizedBox
-                                                                    .shrink();
-                                                              }
-
-                                                              return Text(
-                                                                diff > 0
-                                                                    ? '+$diff'
-                                                                    : '$diff',
-                                                                style:
-                                                                    TextStyle(
-                                                                  fontSize: 14,
-                                                                  color: diff >
-                                                                          0
-                                                                      ? Colors
-                                                                          .green
-                                                                      : Colors
-                                                                          .red,
-                                                                ),
-                                                              );
-                                                            }),
-                                                        ],
+                                                    ? Text(
+                                                        'Payment: ${student.paymentMethod} ${student.balance != null ? '(${student.balance!.toInt()})' : ''}',
+                                                        style: TextStyle(
+                                                          fontSize: 14,
+                                                          color:
+                                                              student.paymentMethod ==
+                                                                      'GPay'
+                                                                  ? Colors.green
+                                                                  : Colors.blue,
+                                                        ),
                                                       )
                                                     : null,
                                                 trailing: Checkbox(

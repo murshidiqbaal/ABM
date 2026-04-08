@@ -120,4 +120,20 @@ class DatabaseService {
     }).toList();
     await _client.from(_studentsTable).insert(studentsData);
   }
+
+  /// Update collection and optionally update balances for all paid students
+  Future<void> updateCollectionWithBalanceOption(int collectionId, String title,
+      String amount, bool updateBalances) async {
+    // 1. Update the Collection itself
+    await updateCollection(collectionId, title, amount);
+
+    // 2. If requested, update the balances of all students who have 'paid' (is_selected = true)
+    if (updateBalances) {
+      await _client
+          .from(_studentsTable)
+          .update({'balance': amount})
+          .eq('collection_id', collectionId)
+          .eq('is_selected', true);
+    }
+  }
 }

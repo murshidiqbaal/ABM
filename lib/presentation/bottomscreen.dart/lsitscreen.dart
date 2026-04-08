@@ -10,6 +10,7 @@ import '../../constants/mytextfield.dart';
 import '../../constants/student_data.dart';
 import '../../dbmodels/models.dart';
 import '../../services/database_service.dart';
+import '../../services/undo_redo_service.dart';
 import '../create_list_screen.dart';
 import '../studentlist.dart';
 
@@ -110,7 +111,19 @@ class _ListScreenState extends State<ListScreen> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(context); // Close dialog
-              await _databaseService.deleteCollection(collection.id!);
+
+              final command =
+                  DeleteCollectionCommand(collection, _databaseService);
+              await command.prepare(); // Fetch backup data
+              await command.execute();
+
+              if (context.mounted) {
+                UndoRedoManager().addCommand(command);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('List "${collection.title}" deleted'),
+                  duration: const Duration(seconds: 2),
+                ));
+              }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Delete', style: TextStyle(color: Colors.white)),
@@ -153,14 +166,50 @@ class _ListScreenState extends State<ListScreen> {
           ElevatedButton(
             onPressed: () async {
               if (titleController.text.isNotEmpty) {
+                String newAmount =
+                    amountController.text.isEmpty ? '0' : amountController.text;
+                String oldAmount = collection.amount;
+
+                bool updateBalances = false;
+
+                // 1. Check if Amount Changed
+                if (newAmount != oldAmount) {
+                  // 2. Ask User Preference
+                  bool? confirmUpdate = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Update Student Balances?'),
+                      content: const Text(
+                          'You changed the amount. Do you want to update the payment record for all students who have already paid?\n\n'
+                          'YES: Sets their paid amount to the new value.\n'
+                          'NO: Keeps their old payment amount (you can edit manually).'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false), // No
+                          child: const Text('No (Manual)'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(context, true), // Yes
+                          child: const Text('Yes (Auto-Update)'),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  // If user cancelled the second dialog (clicked outside), assume No or abort?
+                  // Let's assume No (false) if null, to be safe.
+                  updateBalances = confirmUpdate ?? false;
+                }
+
                 try {
-                  await _databaseService.updateCollection(
+                  await _databaseService.updateCollectionWithBalanceOption(
                     collection.id!,
                     titleController.text,
-                    amountController.text.isEmpty ? '0' : amountController.text,
+                    newAmount,
+                    updateBalances,
                   );
                   if (context.mounted) {
-                    Navigator.pop(context);
+                    Navigator.pop(context); // Close Main Dialog
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                           content: Text('List updated successfully')),

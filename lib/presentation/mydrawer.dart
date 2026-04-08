@@ -1,6 +1,7 @@
 import 'package:_abm/presentation/bottomscreen.dart/calculatescreen.dart';
 import 'package:_abm/presentation/bottomscreen.dart/lsitscreen.dart';
 import 'package:_abm/presentation/bottomscreen.dart/profilescreen.dart';
+import 'package:_abm/services/undo_redo_service.dart';
 import 'package:_abm/theme/theme_manager.dart';
 import 'package:flutter/material.dart';
 
@@ -106,6 +107,40 @@ class MyDrawer extends StatelessWidget {
                   },
                   icon: Icon(Icons.account_circle_rounded)),
             ),
+          ),
+          ListenableBuilder(
+            listenable: UndoRedoManager(),
+            builder: (context, _) {
+              final manager = UndoRedoManager();
+              return Column(
+                children: [
+                  ListTile(
+                    title: const Text('Undo'),
+                    leading: const Icon(Icons.undo),
+                    enabled: manager.canUndo,
+                    onTap: manager.canUndo
+                        ? () async {
+                            await manager.undo();
+                            if (context.mounted)
+                              Navigator.pop(context); // Close drawer
+                          }
+                        : null,
+                  ),
+                  ListTile(
+                    title: const Text('Redo'),
+                    leading: const Icon(Icons.redo),
+                    enabled: manager.canRedo,
+                    onTap: manager.canRedo
+                        ? () async {
+                            await manager.redo();
+                            if (context.mounted)
+                              Navigator.pop(context); // Close drawer
+                          }
+                        : null,
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),

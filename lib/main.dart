@@ -1,14 +1,15 @@
+import 'package:_abm/dbmodels/models.dart';
+import 'package:_abm/dbmodels/profile.dart';
+import 'package:_abm/responsive/desktop.dart';
+import 'package:_abm/responsive/mobile.dart';
+import 'package:_abm/responsive/responsive_layout.dart';
+import 'package:_abm/responsive/tablet.dart';
+import 'package:_abm/services/undo_redo_service.dart';
 import 'package:_abm/theme/theme_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:shake/shake.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-import 'dbmodels/models.dart';
-import 'dbmodels/profile.dart';
-import 'responsive/desktop.dart';
-import 'responsive/mobile.dart';
-import 'responsive/responsive_layout.dart';
-import 'responsive/tablet.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -114,13 +115,92 @@ class MyApp extends StatelessWidget {
               behavior: SnackBarBehavior.floating,
             ),
           ),
-          home: const ResponsiveLayout(
-            mobileScaffold: MobileScreen(),
-            tabletScaffold: TabletScreen(),
-            desktopScaffold: DesktopScreen(),
+          home: const ShakeWrapper(
+            child: ResponsiveLayout(
+              mobileScaffold: MobileScreen(),
+              tabletScaffold: TabletScreen(),
+              desktopScaffold: DesktopScreen(),
+            ),
           ),
         );
       },
     );
+  }
+}
+
+class ShakeWrapper extends StatefulWidget {
+  final Widget child;
+  const ShakeWrapper({super.key, required this.child});
+
+  @override
+  State<ShakeWrapper> createState() => _ShakeWrapperState();
+}
+
+class _ShakeWrapperState extends State<ShakeWrapper> {
+  late ShakeDetector detector;
+
+  @override
+  void initState() {
+    super.initState();
+    detector = ShakeDetector.autoStart(
+      onPhoneShake: () {
+        debugPrint("Shake event detected in Main");
+        final manager = UndoRedoManager();
+        if (manager.canUndo || manager.canRedo) {
+          if (context.mounted) {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Undo / Redo'),
+                content:
+                    const Text('Do you want to undo or redo the last action?'),
+                actions: [
+                  if (manager.canRedo)
+                    TextButton(
+                      onPressed: () {
+                        manager.redo();
+                        Navigator.pop(context);
+                      },
+                      child: const Text('Redo'),
+                    ),
+                  if (manager.canUndo)
+                    ElevatedButton(
+                      onPressed: () {
+                        manager.undo();
+                        Navigator.pop(context);
+                      },
+                      child: const Text('Undo'),
+                    ),
+                ],
+              ),
+            );
+          }
+        } else {
+          debugPrint("Shake detected but nothing to undo/redo");
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text("No actions to undo!"),
+              duration: Duration(seconds: 1),
+            ));
+          }
+        }
+      },
+      shakeThresholdGravity:
+          2.7, // Slightly lower threshold (default 2.7 is standard, but keeping explicit helps)
+      minimumShakeCount: 1, // Require 1 shake (default is usually 1)
+      shakeSlopTimeMS: 500,
+      shakeCountResetTime: 3000,
+    );
+  }
+
+  @override
+  void dispose() {
+    detector.stopListening();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
   }
 }
